@@ -11,6 +11,11 @@ You have three options:
 2. If you wish write scripts you may install it as a pip package 
 3. If you want to contribute see CONTRIBUTING.md
 
+On macOS, `./install.sh` automates option 1 for IDA 9.x: it locates the newest IDA installation, resolves the
+Python interpreter selected by `idapyswitch`, installs this repository as an editable package into it, and copies
+the plugin stub into `$IDAUSR/plugins` (default `~/.idapro/plugins`). Override detection with `IDA_DIR`, `IDAUSR`,
+or `IDA_PYTHON`.
+
 For now it is better that you install it as a pip package and then run `cli.py`
 ```
 usage: cli.py [-h] (--idb IDB | --kc KC) [--no-auto-analysis] [--enable-console-messages]
