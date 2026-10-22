@@ -11,10 +11,10 @@ You have three options:
 2. If you wish write scripts you may install it as a pip package 
 3. If you want to contribute see CONTRIBUTING.md
 
-On macOS, `./install.sh` automates option 1 for IDA 9.x: it locates the newest IDA installation, resolves the
-Python interpreter selected by `idapyswitch`, installs this repository as an editable package into it, and copies
-the plugin stub into `$IDAUSR/plugins` (default `~/.idapro/plugins`). Override detection with `IDA_DIR`, `IDAUSR`,
-or `IDA_PYTHON`.
+On macOS, `./install.sh` automates option 1 for IDA 9.x: it links this repository's `ida_kernelcache` package
+(and the `symdb.json` it loads) into `$IDAUSR/python` (default `~/.idapro/python`), which IDA adds to `sys.path`,
+and installs the plugin stub into `$IDAUSR/plugins`. Because the package is pure Python, the script never needs
+to know which interpreter `idapyswitch` selected. Override the user directory with `IDAUSR`.
 
 For now it is better that you install it as a pip package and then run `cli.py`
 ```
