@@ -72,21 +72,56 @@ read_python_dll() {
     ' "$registry" "Python3TargetDLL"
 }
 
-# Maps a libpython dylib to the matching python3 executable.
-python_from_dll() {
-    local dll="$1" dir candidate
-    dir=$(dirname -- "$dll")
+# True if $1 is a Python whose major.minor version is exactly $2.
+python_version_matches() {
+    local python="$1" version="$2"
+    "$python" -c "import sys; raise SystemExit(0 if '.'.join(map(str, sys.version_info[:2])) == '$version' else 1)" 2>/dev/null
+}
 
-    # Framework layout: .../Versions/<x.y>/Python -> .../Versions/<x.y>/bin/python3
-    if [[ "$dll" == */Versions/*/Python ]]; then
-        candidate="$dir/bin/python3"
-        [[ -x "$candidate" ]] && { printf '%s\n' "$candidate"; return 0; }
+# Maps the libpython dylib IDA was configured with to a usable interpreter.
+# Note that .../Versions/<x.y>/Python is the framework library, not an executable;
+# the interpreter is exposed as bin/python3 (or bin/python3.<minor>) and as the
+# app-bundle launcher Resources/Python.app/Contents/MacOS/Python.
+find_python_for_dll() {
+    local dll="$1" dir version candidate
+    dir=$(dirname -- "$dll")
+    version=""
+    if [[ "$dir" == */Versions/* ]]; then
+        # Normalize e.g. 3.14.8 to 3.14; this also rejects a symbolic "Current"
+        # version, for which no version-matched PATH fallback is possible.
+        if [[ "${dir##*/}" =~ ^([0-9]+)\.([0-9]+) ]]; then
+            version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+        fi
     fi
 
-    # libpython3.x.dylib layout: look for a sibling bin/ directory.
-    for candidate in "$dir/bin/python3" "$dir/../bin/python3" "$dir/../python3"; do
-        [[ -x "$candidate" ]] && { printf '%s\n' "$candidate"; return 0; }
+    local candidates=()
+    if [[ "$dir" == */Versions/* ]]; then
+        candidates+=("$dir/bin/python3" "$dir/Resources/Python.app/Contents/MacOS/Python")
+        [[ -n "$version" ]] && candidates+=("$dir/bin/python$version")
+    else
+        # libpython3.x.dylib layout (uv, pyenv, ...): look around the dylib.
+        candidates+=("$dir/bin/python3" "$dir/../bin/python3" "$dir/../python3")
+    fi
+
+    for candidate in "${candidates[@]}"; do
+        [[ -x "$candidate" ]] || continue
+        [[ -z "$version" ]] || python_version_matches "$candidate" "$version" || continue
+        printf '%s\n' "$candidate"
+        return 0
     done
+
+    # The interpreter idapyswitch selected may have been upgraded or cleaned up;
+    # any interpreter of the same version writes to the same user site-packages
+    # directory that IDA's interpreter loads.
+    if [[ -n "$version" ]]; then
+        for candidate in "$(command -v "python$version" || true)" "$(command -v python3 || true)"; do
+            [[ -n "$candidate" && -x "$candidate" ]] || continue
+            python_version_matches "$candidate" "$version" || continue
+            log "warning: no interpreter found next to \"$dll\", falling back to $candidate" >&2
+            printf '%s\n' "$candidate"
+            return 0
+        done
+    fi
     return 1
 }
 
@@ -99,8 +134,12 @@ detect_python() {
 
     local dll=""
     if dll=$(read_python_dll) && [[ -n "$dll" ]]; then
-        IDA_PYTHON=$(python_from_dll "$dll") ||
-            die "IDA targets \"$dll\" but no python3 executable was found next to it; set IDA_PYTHON"
+        # Resolve framework symlinks (python.org's Versions/Current, Homebrew kegs).
+        if [[ -e "$dll" ]] && command -v realpath >/dev/null; then
+            dll=$(realpath -- "$dll")
+        fi
+        IDA_PYTHON=$(find_python_for_dll "$dll") ||
+            die "IDA is configured to use \"$dll\", but no usable python3 interpreter was found next to it or on PATH; set IDA_PYTHON"
     else
         die "IDA has no Python configured (no Python3TargetDLL in $IDAUSR/ida.reg); run \"$IDA_DIR/Contents/MacOS/idapyswitch\" or set IDA_PYTHON"
     fi
@@ -154,4 +193,6 @@ main() {
     log "Done. Restart IDA and run \"IDA KernelCache NG\" from the Edit > Plugins menu on an ARM64 kernelcache."
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
